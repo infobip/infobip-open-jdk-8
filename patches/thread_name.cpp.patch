@@ -1,0 +1,22 @@
+diff -r f49ce2149e43 src/os/linux/vm/os_linux.cpp
+--- a/src/os/linux/vm/os_linux.cpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/os/linux/vm/os_linux.cpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -4945,9 +4945,16 @@
+   return online_cpus;
+ }
+ 
++#define MAXTHREADNAMESIZE 16
++
+ void os::set_native_thread_name(const char *name) {
+-  // Not yet implemented.
+-  return;
++  if (name != NULL) {
++    // The maximum length is 16 (including the trailing \0), we copy
++    // the first 15 chars into the buffer.
++    char buf[MAXTHREADNAMESIZE];
++    snprintf(buf, sizeof(buf), "%s", name);
++    pthread_setname_np(pthread_self(), buf);
++  }
+ }
+ 
+ bool os::distribute_processes(uint length, uint* distribution) {

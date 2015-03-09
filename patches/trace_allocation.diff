@@ -1,0 +1,97 @@
+diff -r f49ce2149e43 src/share/vm/gc_implementation/g1/g1CollectedHeap.cpp
+--- a/src/share/vm/gc_implementation/g1/g1CollectedHeap.cpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/gc_implementation/g1/g1CollectedHeap.cpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -861,6 +861,10 @@
+     if (result != NULL) {
+       return result;
+     }
++    
++    if (G1TraceFullGCAllocations && try_count == 1) {
++      trace_allocation(gclog_or_tty, word_size, Thread::current(), "Full GC cause");
++    }
+ 
+     // Create the garbage collection operation...
+     VM_G1CollectForAllocation op(gc_count_before, word_size);
+diff -r f49ce2149e43 src/share/vm/gc_implementation/g1/g1_globals.hpp
+--- a/src/share/vm/gc_implementation/g1/g1_globals.hpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/gc_implementation/g1/g1_globals.hpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -331,6 +331,9 @@
+   diagnostic(bool, G1VerifyHeapRegionCodeRoots, false,                      \
+           "Verify the code root lists attached to each heap region.")       \
+                                                                             \
++  diagnostic(bool, G1TraceFullGCAllocations, false,                         \
++             "Trace allocations which are causing Full GC.")                \
++                                                                            \
+   develop(bool, G1VerifyBitmaps, false,                                     \
+           "Verifies the consistency of the marking bitmaps")
+ 
+diff -r f49ce2149e43 src/share/vm/gc_interface/collectedHeap.cpp
+--- a/src/share/vm/gc_interface/collectedHeap.cpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/gc_interface/collectedHeap.cpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -582,6 +582,24 @@
+   }
+ }
+ 
++void CollectedHeap::trace_allocation(outputStream* st, size_t word_size, Thread* thread, const char *cause) {
++  size_t byte_size = word_size * HeapWordSize;
++  st->date_stamp(PrintGCDateStamps);
++  st->stamp(PrintGCTimeStamps);
++  st->print("%s - [Thread %s] Allocating %.1f%s", cause, thread->name(),
++                      byte_size_in_proper_unit((double)byte_size),
++                      proper_unit_for_byte_size(byte_size)); 
++  if (thread->is_Java_thread()) {
++    st->print_cr(" from Java:");
++    ((JavaThread*)thread)->print_stack_on(st);
++  }
++  else {
++    st->cr();
++  }
++  
++  st->flush();
++}
++
+ /////////////// Unit tests ///////////////
+ 
+ #ifndef PRODUCT
+diff -r f49ce2149e43 src/share/vm/gc_interface/collectedHeap.hpp
+--- a/src/share/vm/gc_interface/collectedHeap.hpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/gc_interface/collectedHeap.hpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -181,6 +181,9 @@
+   virtual void check_for_non_bad_heap_word_value(HeapWord* addr, size_t size)
+     PRODUCT_RETURN;
+   debug_only(static void check_for_valid_allocation_state();)
++  
++  // Dump thread stack-trace and basic information about the allocation
++  static void trace_allocation(outputStream* st, size_t size, Thread* thread, const char *cause);
+ 
+  public:
+   enum Name {
+diff -r f49ce2149e43 src/share/vm/gc_interface/collectedHeap.inline.hpp
+--- a/src/share/vm/gc_interface/collectedHeap.inline.hpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/gc_interface/collectedHeap.inline.hpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -120,6 +120,10 @@
+     NOT_PRODUCT(guarantee(false, "Should not allocate with exception pending"));
+     return NULL;  // caller does a CHECK_0 too
+   }
++  
++  if (TraceLargerAllocations > 0 && size * HeapWordSize > TraceLargerAllocations) {
++    trace_allocation(gclog_or_tty, size, THREAD, "Large allocation");
++  }
+ 
+   HeapWord* result = NULL;
+   if (UseTLAB) {
+diff -r f49ce2149e43 src/share/vm/runtime/globals.hpp
+--- a/src/share/vm/runtime/globals.hpp	Wed Mar 04 12:26:12 2015 -0800
++++ b/src/share/vm/runtime/globals.hpp	Mon Mar 09 14:57:51 2015 +0100
+@@ -3943,7 +3943,10 @@
+           "Enable event-based tracing")                                     \
+                                                                             \
+   product(bool, UseLockedTracing, false,                                    \
+-          "Use locked-tracing when doing event-based tracing")
++          "Use locked-tracing when doing event-based tracing")              \
++                                                                            \
++  diagnostic(uintx, TraceLargerAllocations, 0,                              \
++          "Trace heap allocations larger than the specified size")
+ 
+ /*
+  *  Macros for factoring of globals
