@@ -1,0 +1,104 @@
+diff -r 22d7a88dbe78 src/share/vm/gc/g1/g1CollectedHeap.cpp
+--- a/src/share/vm/gc/g1/g1CollectedHeap.cpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/gc/g1/g1CollectedHeap.cpp	Wed May 16 09:21:42 2018 +0200
+@@ -490,6 +490,10 @@
+       return result;
+     }
+ 
++    if (G1TraceFullGCAllocations && try_count == 1) {
++      trace_allocation(tty, word_size, Thread::current(), "Full GC cause");
++    }
++
+     // Create the garbage collection operation...
+     VM_G1CollectForAllocation op(gc_count_before, word_size);
+     op.set_allocation_context(AllocationContext::current());
+diff -r 22d7a88dbe78 src/share/vm/gc/g1/g1_globals.hpp
+--- a/src/share/vm/gc/g1/g1_globals.hpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/gc/g1/g1_globals.hpp	Wed May 16 09:21:42 2018 +0200
+@@ -220,6 +220,9 @@
+           "during RSet scanning.")                                          \
+           range(1, max_uintx)                                               \
+                                                                             \
++  diagnostic(bool, G1TraceFullGCAllocations, false,                         \
++           "Trace allocations which are causing Full GC.")                  \
++                                                                            \
+   develop(uintx, G1SecondaryFreeListAppendLength, 5,                        \
+           "The number of regions we will add to the secondary free list "   \
+           "at every append operation")                                      \
+@@ -318,7 +321,7 @@
+                                                                             \
+   develop(bool, G1VerifyBitmaps, false,                                     \
+           "Verifies the consistency of the marking bitmaps")
+-
++                                                                           
+ G1_FLAGS(DECLARE_DEVELOPER_FLAG, \
+          DECLARE_PD_DEVELOPER_FLAG, \
+          DECLARE_PRODUCT_FLAG, \
+diff -r 22d7a88dbe78 src/share/vm/gc/shared/collectedHeap.cpp
+--- a/src/share/vm/gc/shared/collectedHeap.cpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/gc/shared/collectedHeap.cpp	Wed May 16 09:21:42 2018 +0200
+@@ -515,6 +515,24 @@
+   return NULL;
+ }
+ 
++void CollectedHeap::trace_allocation(outputStream* st, size_t word_size, Thread* thread, const char *cause) {
++  size_t byte_size = word_size * HeapWordSize;
++  st->date_stamp(true, "", ": ");
++  st->stamp(true, "", ": ");
++  st->print("%s - [Thread %s] Allocating %.1f%s", cause, thread->name(),
++                      byte_size_in_proper_unit((double)byte_size),
++                      proper_unit_for_byte_size(byte_size));
++  if (thread->is_Java_thread()) {
++    st->print_cr(" from Java:");
++    ((JavaThread*)thread)->print_stack_on(st);
++  }
++  else {
++    st->cr();
++  }
++
++  st->flush();
++}
++
+ void CollectedHeap::ensure_parsability(bool retire_tlabs) {
+   // The second disjunct in the assertion below makes a concession
+   // for the start-up verification done while the VM is being
+diff -r 22d7a88dbe78 src/share/vm/gc/shared/collectedHeap.hpp
+--- a/src/share/vm/gc/shared/collectedHeap.hpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/gc/shared/collectedHeap.hpp	Wed May 16 09:21:42 2018 +0200
+@@ -187,6 +187,9 @@
+     PRODUCT_RETURN;
+   debug_only(static void check_for_valid_allocation_state();)
+ 
++  // Dump thread stack-trace and basic information about the allocation
++  static void trace_allocation(outputStream* st, size_t size, Thread* thread, const char *cause);
++
+  public:
+   enum Name {
+     GenCollectedHeap,
+diff -r 22d7a88dbe78 src/share/vm/gc/shared/collectedHeap.inline.hpp
+--- a/src/share/vm/gc/shared/collectedHeap.inline.hpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/gc/shared/collectedHeap.inline.hpp	Wed May 16 09:21:42 2018 +0200
+@@ -136,6 +136,10 @@
+     return NULL;  // caller does a CHECK_0 too
+   }
+ 
++  if (TraceLargerAllocations > 0 && size * HeapWordSize > TraceLargerAllocations) {
++    trace_allocation(tty, size, THREAD, "Large allocation");
++  }
++
+   HeapWord* result = NULL;
+   if (UseTLAB) {
+     result = allocate_from_tlab(klass, THREAD, size);
+diff -r 22d7a88dbe78 src/share/vm/runtime/globals.hpp
+--- a/src/share/vm/runtime/globals.hpp	Wed Feb 14 06:56:02 2018 -0800
++++ b/src/share/vm/runtime/globals.hpp	Wed May 16 09:21:42 2018 +0200
+@@ -3886,6 +3886,9 @@
+   product(ccstr, ErrorReportServer, NULL,                                   \
+           "Override built-in error report server address")                  \
+                                                                             \
++  diagnostic(uintx, TraceLargerAllocations, 0,                              \
++          "Trace heap allocations larger than the specified size")          \
++                                                                            \
+   /* Shared spaces */                                                       \
+                                                                             \
+   product(bool, UseSharedSpaces, true,                                      \
